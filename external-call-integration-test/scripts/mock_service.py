@@ -15,7 +15,7 @@ Mock extension service for testing. Behavior controlled by function_id:
   large-output    returns 100KB
 
 Endpoints: POST /api/v1/external-call, GET /health, GET /counts, POST /reset
-Stats written to /tmp/external_call_test_counts.json
+Stats written to /tmp/external_call_test_counts_{PORT}.json (port-specific)
 """
 
 import json
@@ -44,12 +44,19 @@ lock = threading.Lock()
 # Configuration
 REQUIRE_JWT = os.environ.get("REQUIRE_JWT", "0") == "1"
 EXPECTED_JWT = os.environ.get("EXPECTED_JWT", "test-token")
-COUNTS_FILE = "/tmp/external_call_test_counts.json"
+COUNTS_FILE = "/tmp/external_call_test_counts.json"  # Will be updated with port suffix
+SERVICE_PORT = 8080  # Will be set on startup
+
+
+def get_counts_file():
+    """Get the port-specific counts file path."""
+    return f"/tmp/external_call_test_counts_{SERVICE_PORT}.json"
 
 
 def save_counts():
     """Save current counts to file for test assertions."""
-    with open(COUNTS_FILE, "w") as f:
+    counts_file = get_counts_file()
+    with open(counts_file, "w") as f:
         json.dump({
             "counts": request_counts,
             "log": request_log[-100:],  # Keep last 100 entries
@@ -338,6 +345,9 @@ class MockExtensionHandler(BaseHTTPRequestHandler):
 
 
 def run(port=8080, use_tls=False, cert_file=None, key_file=None):
+    global SERVICE_PORT
+    SERVICE_PORT = port
+
     # Initialize counts file
     save_counts()
 
@@ -358,7 +368,7 @@ def run(port=8080, use_tls=False, cert_file=None, key_file=None):
     print("Mock Extension Service (Enhanced)")
     print("=" * 60)
     print(f"Listening on: {scheme}://127.0.0.1:{port}")
-    print(f"Counts file:  {COUNTS_FILE}")
+    print(f"Counts file:  {get_counts_file()}")
     print(f"JWT Required: {REQUIRE_JWT}")
     if REQUIRE_JWT:
         print(f"Expected JWT: {EXPECTED_JWT[:10]}...")

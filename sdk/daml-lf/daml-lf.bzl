@@ -243,6 +243,12 @@ def _init_data():
             "version_req": dev_only,
         },
         {
+            "name": "featureExternalCall",
+            "name_pretty": "External Call",
+            "cpp_flag": "DAML_EXTERNAL_CALL",
+            "version_req": dev_only,
+        },
+        {
             "name": "featureUnsafeFromInterface",
             "name_pretty": "UnsafeFromInterface builtin",
             "cpp_flag": "DAML_UnsafeFromInterface",
