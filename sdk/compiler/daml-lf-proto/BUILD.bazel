@@ -15,6 +15,7 @@ genrule(
           $(location @bazel_tools//tools/zip:zipper) x $(SRCS) -d $(RULEDIR) \
             $${out#$(RULEDIR)/}
         done
+        sed -i 's|SECP256K1_VALIDATE_KEY = 73;|SECP256K1_VALIDATE_KEY = 73;\\n  EXTERNAL_CALL = 5001; // *Available in versions >= 2.dev*|' $(RULEDIR)/com/digitalasset/daml/lf/archive/daml_lf2.proto
     """,
     tools = ["@bazel_tools//tools/zip:zipper"],
 )
