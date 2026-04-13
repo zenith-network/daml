@@ -5,17 +5,19 @@ load("//bazel_tools:haskell.bzl", "da_haskell_library", "da_haskell_test", "gene
 
 genrule(
     name = "daml_lf_archive_proto_srcs",
-    srcs = ["@maven//:com_daml_daml_lf_archive_2_13"],
+    srcs = [
+        "@maven//:com_daml_daml_lf_archive_2_13",
+        "daml_lf2.proto",
+    ],
     outs = [
         "com/digitalasset/daml/lf/archive/daml_lf.proto",
         "com/digitalasset/daml/lf/archive/daml_lf2.proto",
     ],
     cmd = """
-        for out in $(OUTS); do
-          $(location @bazel_tools//tools/zip:zipper) x $(SRCS) -d $(RULEDIR) \
-            $${out#$(RULEDIR)/}
-        done
-        sed -i 's|SECP256K1_VALIDATE_KEY = 73;|SECP256K1_VALIDATE_KEY = 73;\\n  EXTERNAL_CALL = 5001; // *Available in versions >= 2.dev*|' $(RULEDIR)/com/digitalasset/daml/lf/archive/daml_lf2.proto
+        $(location @bazel_tools//tools/zip:zipper) x $(location @maven//:com_daml_daml_lf_archive_2_13) \
+          -d $(RULEDIR) com/digitalasset/daml/lf/archive/daml_lf.proto
+        cp $(location daml_lf2.proto) \
+          $(RULEDIR)/com/digitalasset/daml/lf/archive/daml_lf2.proto
     """,
     tools = ["@bazel_tools//tools/zip:zipper"],
 )
