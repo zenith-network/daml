@@ -10,6 +10,7 @@ def jest_test(name, srcs, deps, jest_config = ":jest.config.js", tsconfig = ":ts
         "--no-cache",
         "--no-watchman",
         "--ci",
+        "--runInBand",
     ]
     args.extend(["--config", "$(location %s)" % jest_config])
     for src in srcs:

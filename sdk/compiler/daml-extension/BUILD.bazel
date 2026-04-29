@@ -120,10 +120,23 @@ genrule(
 
         DIR=$$PWD
         YARN=$$DIR/$(location //:yarn)
-        YARN_DIR=$$(dirname $$DIR/$(location //:yarn))
+        NPM=$$DIR/$(location @nodejs_linux_amd64//:npm)
+        export YARN
+        export NPM
         VSCE=$$DIR/$(location @daml_extension_deps//@vscode/vsce/bin:vsce)
 
         cp -r compiler/daml-extension $$TMP_DIR
+        mkdir -p $$TMP_DIR/bin
+        cat > $$TMP_DIR/bin/yarn <<'EOF'
+#!/bin/sh
+exec "$$YARN" "$$@"
+EOF
+        cat > $$TMP_DIR/bin/npm <<'EOF'
+#!/bin/sh
+exec "$$NPM" "$$@"
+EOF
+        chmod +x $$TMP_DIR/bin/yarn
+        chmod +x $$TMP_DIR/bin/npm
         cd $$TMP_DIR/daml-extension
 
         echo $(TARGET_CPU) > ../target_cpu
@@ -133,10 +146,11 @@ genrule(
         sed -i 's/"name": "daml"/"name": "daml-bundled"/' package.json
 
         $$YARN compile
-        PATH=$$YARN_DIR:$$PATH $$VSCE package --yarn -o $$DIR/$@
+        NP_SUBPROCESS_NODE_DIR=$$TMP_DIR/bin PATH=$$TMP_DIR/bin:$$PATH $$VSCE package --no-yarn -o $$DIR/$@
     """.format(npm = npm_version),
     tools = [
         "//:yarn",
+        "@nodejs_linux_amd64//:npm",
         "@daml_extension_deps//@vscode/vsce/bin:vsce",
     ],
 )

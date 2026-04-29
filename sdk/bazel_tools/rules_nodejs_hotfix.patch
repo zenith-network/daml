@@ -32,3 +32,19 @@ index c04e109..3072ca6 100755
          "bin": ctx.bin_dir.path,
          "module_sets": module_sets,
          "roots": node_modules_roots,
+diff --git a/internal/node/node.bzl b/internal/node/node.bzl
+index 8517b44..f545d71 100755
+--- a/internal/node/node.bzl
++++ b/internal/node/node.bzl
+@@ -438,9 +438,10 @@ The set of default  environment variables is:
+ 
+ - `VERBOSE_LOGS`: use by some rules & tools to turn on debug output in their logs
+ - `NODE_DEBUG`: used by node.js itself to print more logs
++- `PATH`: needed by generated shell wrappers that use env, grep, cut, bash, or uname
+ - `RUNFILES_LIB_DEBUG`: print diagnostic message from Bazel runfiles.bash helper
+ """,
+-        default = ["VERBOSE_LOGS", "NODE_DEBUG", "RUNFILES_LIB_DEBUG"],
++        default = ["VERBOSE_LOGS", "NODE_DEBUG", "PATH", "RUNFILES_LIB_DEBUG"],
+     ),
+     "entry_point": attr.label(
+         doc = """The script which should be executed first, usually containing a main function.

@@ -3,33 +3,42 @@
 
 load("@os_info//:os_info.bzl", "is_windows")
 load("@build_environment//:configuration.bzl", "sdk_version")
-load("@build_bazel_rules_nodejs//:index.bzl", "npm_package_bin")
+load("@build_bazel_rules_nodejs//:index.bzl", "nodejs_binary")
 
 def ts_docs(pkg_name, srcs, deps):
     "Macro for Typescript documentation generation with typedoc"
 
-    npm_package_bin(
-        name = "docs-raw",
-        data = [":tsconfig.json"] + srcs + [":README.md"] + deps,
-        tool =
-            "@language_support_js_deps//typedoc/bin:typedoc",
-        output_dir = True,
-        args = ["--tsconfig", "$(execpath :tsconfig.json)", "$(execpath :index.ts)", "--out", "$(@D)"],
-        visibility = ["//visibility:public"],
+    nodejs_binary(
+        name = "_typedoc_cli",
+        data = deps + [
+            "@language_support_js_deps//typedoc:typedoc",
+        ],
+        entry_point = {
+            "@language_support_js_deps//:node_modules/typedoc": "dist/lib/cli.js",
+        },
+        visibility = ["//visibility:private"],
     ) if not is_windows else None
 
     native.genrule(
         name = "docs",
-        tools = ["//bazel_tools/sh:mktgz"],
         outs = [pkg_name + "-docs.tar.gz"],
-        srcs = [":docs-raw"],
+        srcs = [":README.md", ":tsconfig.json"] + srcs,
+        tools = [
+            ":_typedoc_cli",
+            "//bazel_tools/sh:mktgz",
+        ],
         cmd = """
           set -eou pipefail
-          DIR=$(location :docs-raw)
           WORKDIR=$$(mktemp -d)
           trap "rm -rf $$WORKDIR" EXIT
+          # Ensure the launcher can find basic shell tools on NixOS/Linux sandboxes.
+          export PATH="/run/current-system/sw/bin:$$PATH"
+
           mkdir -p $$WORKDIR/docs
-          cp -r $$DIR/* $$WORKDIR/docs
+          $(execpath :_typedoc_cli) \
+            --tsconfig $(location :tsconfig.json) \
+            $(location :index.ts) \
+            --out $$WORKDIR/docs
 
           # Replace version number in all files
           sed -i -e 's/0.0.0-SDKVERSION/{sdk_version}/' $$WORKDIR/**/*.html
