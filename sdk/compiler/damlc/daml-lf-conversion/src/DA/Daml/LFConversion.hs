@@ -1656,6 +1656,12 @@ convertExpr env0 e = do
             pure $ ETmLam (v, TStruct fields) $ ERecCon tupleType $ zipWithFrom mkFieldProj (1 :: Int) fields
     go env (VarIn GHC_Types "primitive") (LType (isStrLitTy -> Just y) : LType t : args)
         = fmap (, args) $ convertPrim (envLfVersion env) (unpackFS y) =<< convertType env t
+    go env (VarIn DA_External "externalCall") (LType input : LType output : args)
+        = fmap (, args) $ do
+            inputTy <- convertType env input
+            outputTy <- convertType env output
+            convertPrim (envLfVersion env) "BEExternalCall" $
+                TText :-> TText :-> TText :-> inputTy :-> TUpdate outputTy
     -- erase bypassReduceLambda calls and leave only the body.
     go env (VarIn DA_Internal_Desugar "bypassReduceLambda") (LType _t : LExpr body : args)
         = go env body args

@@ -324,7 +324,7 @@ data BuiltinExpr
   | BEKecCak256Text              -- :: Text -> Text
   | BEEncodeHex                  -- :: Text -> Text
   | BEDecodeHex                  -- :: Text -> Text
-  | BEExternalCall               -- :: Text -> Text -> Text -> Text -> Update Text
+  | BEExternalCall               -- :: forall input output. Text -> Text -> Text -> input -> Update output
   | BETextToParty                -- :: Text -> Optional Party
   | BETextToInt64                -- :: Text -> Optional Int64
   | BETextToNumeric              -- :: ∀(s:nat). Numeric s -> Text -> Optional (Numeric s)

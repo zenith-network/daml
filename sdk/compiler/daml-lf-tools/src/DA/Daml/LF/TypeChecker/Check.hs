@@ -268,7 +268,8 @@ typeOfBuiltin = \case
   BEKecCak256Text    -> pure $ TText :-> TText
   BEEncodeHex        -> pure $ TText :-> TText
   BEDecodeHex        -> pure $ TText :-> TText
-  BEExternalCall     -> pure $ TText :-> TText :-> TText :-> TText :-> TUpdate TText
+  BEExternalCall     -> pure $ TForall (alpha, KStar) $ TForall (beta, KStar) $
+    TText :-> TText :-> TText :-> tAlpha :-> TUpdate tBeta
   BESecp256k1Bool    -> pure $ TText :-> TText :-> TText :-> TBool
   BESecp256k1WithEcdsaBool -> pure $ TText :-> TText :-> TText :-> TBool
   BESecp256k1ValidateKey -> pure $ TText :-> TBool
