@@ -98,8 +98,9 @@ pattern GHC_Show <- ModuleIn DamlPrim "GHC.Show"
 pattern DA_Internal_Serializable <- ModuleIn DamlPrim "DA.Internal.Serializable"
 
 -- daml-stdlib module patterns
-pattern DA_Action, DA_Internal_Fail_Types, DA_Internal_LF, DA_Internal_Prelude, DA_Internal_Record, DA_Internal_Desugar, DA_Internal_Template_Functions, DA_Internal_Exception, DA_Internal_Interface, DA_Internal_Template, DA_Internal_Compatible, DA_Internal_Serializable :: GHC.Module
+pattern DA_Action, DA_External, DA_Internal_Fail_Types, DA_Internal_LF, DA_Internal_Prelude, DA_Internal_Record, DA_Internal_Desugar, DA_Internal_Template_Functions, DA_Internal_Exception, DA_Internal_Interface, DA_Internal_Template, DA_Internal_Compatible, DA_Internal_Serializable :: GHC.Module
 pattern DA_Action <- ModuleIn DamlStdlib "DA.Action"
+pattern DA_External <- ModuleIn DamlStdlib "DA.External"
 pattern DA_Internal_Fail_Types <- ModuleIn DamlStdlib "DA.Internal.Fail.Types"
 pattern DA_Internal_LF <- ModuleIn DamlStdlib "DA.Internal.LF"
 pattern DA_Internal_Prelude <- ModuleIn DamlStdlib "DA.Internal.Prelude"

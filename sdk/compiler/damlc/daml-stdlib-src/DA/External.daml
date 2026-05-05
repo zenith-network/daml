@@ -37,6 +37,7 @@ isBytesHex hex = Text.length hex % 2 == 0 && isHex hex
 -- - The config or input hex strings are invalid (wrong format or odd length)
 -- - The extension is not configured on the participant
 -- - The HTTP call fails (network error, timeout, non-200 response, etc.)
+-- - The input or output value cannot be encoded or decoded by the runtime
 --
 -- When an error occurs, the transaction will abort with a detailed error message
 -- including HTTP status codes, request IDs, and function context.
@@ -51,7 +52,7 @@ isBytesHex hex = Text.length hex % 2 == 0 && isHex hex
 --
 -- Example:
 --   result : PriceQuote <- externalCall "price-oracle" "get-price" "a1b2c3d4" request
-externalCall : forall input output. (Serializable input, Serializable output) => Text -> Text -> BytesHex -> input -> Update output
+externalCall : forall input output. Text -> Text -> BytesHex -> input -> Update output
 externalCall extensionId functionId configHex input
   | not (isBytesHex configHex) = error ("External call failed: Invalid hex encoding in config: " <> configHex)
   | otherwise = primitive @"BEExternalCall" extensionId functionId (Text.asciiToLower configHex) input
