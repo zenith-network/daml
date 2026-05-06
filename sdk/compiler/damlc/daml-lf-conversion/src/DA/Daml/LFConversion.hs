@@ -1656,7 +1656,7 @@ convertExpr env0 e = do
             pure $ ETmLam (v, TStruct fields) $ ERecCon tupleType $ zipWithFrom mkFieldProj (1 :: Int) fields
     go env (VarIn GHC_Types "primitive") (LType (isStrLitTy -> Just y) : LType t : args)
         = fmap (, args) $ convertPrim (envLfVersion env) (unpackFS y) =<< convertType env t
-    go env (VarIn DA_External "externalCall") (LType input : LType output : args)
+    go env (VarIn DA_External "externalCall") (LType input : LType output : LExpr _serializableInput : LExpr _serializableOutput : args)
         = fmap (, args) $ do
             inputTy <- convertType env input
             outputTy <- convertType env output

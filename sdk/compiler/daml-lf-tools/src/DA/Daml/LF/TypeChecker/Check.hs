@@ -61,6 +61,7 @@ import           DA.Daml.LF.Ast.Numeric
 import qualified DA.Daml.LF.TemplateOrInterface as TemplateOrInterface
 import           DA.Daml.LF.TypeChecker.Env
 import           DA.Daml.LF.TypeChecker.Error
+import qualified DA.Daml.LF.TypeChecker.Serializability as Serializability
 
 
 -- | Check that a list does /not/ contain duplicate elements.
@@ -391,12 +392,29 @@ typeOfTmApp fun arg = do
 
 typeOfTyApp :: MonadGamma m => Expr -> Type -> m Type
 typeOfTyApp expr typ = do
+  case expr of
+    EBuiltinFun BEExternalCall ->
+      checkExternalCallType SRExternalCallInput typ
+    ETyApp (EBuiltinFun BEExternalCall) _inputTyp ->
+      checkExternalCallType SRExternalCallOutput typ
+    _ -> pure ()
   exprType <- typeOf expr
   ((tvar, kind), typeBody) <- match _TForall (EExpectedUniversalType exprType) exprType
   checkType typ kind
   -- NOTE(MH): Calling 'substitute' is safe since @typ@ and @typeBody@ live in
   -- the same context.
   pure (substitute (Map.singleton tvar typ) typeBody)
+
+checkExternalCallType :: MonadGamma m => SerializabilityRequirement -> Type -> m ()
+checkExternalCallType req typ = do
+  Serializability.checkTypeWithTypeVariablesInScope req typ
+  when (containsContractId typ) $
+    throwWithContext (EExpectedSerializableType req typ URContractId)
+  where
+    containsContractId =
+      para \t children -> case t of
+        TContractId{} -> True
+        _ -> or children
 
 typeOfTmLam :: MonadGamma m => (ExprVarName, Type) -> Expr -> m Type
 typeOfTmLam (var, typ) body = do

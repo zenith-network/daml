@@ -90,6 +90,8 @@ data SerializabilityRequirement
   | SRDataType
   | SRExceptionArg
   | SRView
+  | SRExternalCallInput
+  | SRExternalCallOutput
   deriving (Show, Eq)
 
 -- | Reason why a type is not serializable.
@@ -551,6 +553,8 @@ instance Pretty SerializabilityRequirement where
     SRKey -> "template key"
     SRExceptionArg -> "exception argument"
     SRView -> "view"
+    SRExternalCallInput -> "external call input"
+    SRExternalCallOutput -> "external call output"
 
 instance Pretty UnserializabilityReason where
   pPrint = \case

@@ -16,14 +16,18 @@
 -- contain the 'ModuleInterface' produced by 'augmentInterface'.
 module DA.Daml.LF.TypeChecker.Serializability
   ( serializabilityConditionsDataType
+  , checkType
+  , checkTypeWithTypeVariablesInScope
   , checkModule
   , CurrentModule(..)
   ) where
 
 import           Control.Lens (matching, toListOf)
 import           Control.Monad.Extra
+import           Control.Monad.Reader (asks)
 import Data.List
 import           Data.Foldable (for_)
+import qualified Data.HashMap.Strict as HM
 import qualified Data.HashSet as HS
 
 import DA.Daml.LF.Ast
@@ -144,6 +148,17 @@ checkType :: MonadGamma m => SerializabilityRequirement -> Type -> m ()
 checkType req typ = do
   world0 <- getWorld
   case serializabilityConditionsType world0 Nothing HS.empty typ of
+    Left reason -> throwWithContext (EExpectedSerializableType req typ reason)
+    Right _ -> pure ()
+
+-- | Check whether a type is serializable, allowing type variables bound in the
+-- current LF type-checking context. This is used for polymorphic builtins whose
+-- source-level wrappers carry Serializable constraints.
+checkTypeWithTypeVariablesInScope :: MonadGamma m => SerializabilityRequirement -> Type -> m ()
+checkTypeWithTypeVariablesInScope req typ = do
+  world0 <- getWorld
+  vars <- HS.fromList . HM.keys . HM.filter (== KStar) <$> asks _tvars
+  case serializabilityConditionsType world0 Nothing vars typ of
     Left reason -> throwWithContext (EExpectedSerializableType req typ reason)
     Right _ -> pure ()
 
