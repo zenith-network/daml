@@ -1,0 +1,13 @@
+-- Copyright (c) 2026 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+-- SPDX-License-Identifier: Apache-2.0
+
+-- @LEDGER run ExternalCallBytesHexPolicy.EXPECTED.ledger
+
+module ExternalCallBytesHexPolicy where
+
+import Daml.Script
+import DA.External
+
+run : Script Bool
+run = script do
+  pure (isBytesHex "0a" && not (isBytesHex "0A") && not (isBytesHex "abc"))

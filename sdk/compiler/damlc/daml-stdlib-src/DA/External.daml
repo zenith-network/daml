@@ -45,7 +45,7 @@ isBytesHex hex = Text.length hex % 2 == 0 && isHex hex
 -- Parameters:
 --   - extensionId: Identifier of the configured extension (must match canton config)
 --   - functionId: Identifier for the function within the extension
---   - configHex: Configuration hash as hex string (even length, validates service version)
+--   - configHex: Configuration hash as lowercase hex string (even length, validates service version)
 --   - input: Input value encoded by the runtime as LF value bytes
 --
 -- Returns: The response from the external service decoded as a Daml value

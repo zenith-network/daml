@@ -13,13 +13,17 @@ import qualified Data.Text as T
 import DA.Daml.LF.Ast.Base
 import DA.Daml.LF.Ast.Util
 import DA.Daml.LF.Ast.Version (devLfVersion, Version, renderVersion)
-import DA.Daml.LF.Ast.World (initWorld)
+import DA.Daml.LF.Ast.World (initWorld, initWorldSelf)
 import DA.Daml.LF.Simplifier (simplifyModule)
+import qualified DA.Daml.LF.TypeChecker as TypeChecker
+import qualified Development.IDE.Types.Diagnostics as D
 
 
 main :: IO ()
-main = defaultMain $ testGroup "DA.Daml.LF.Simplifier"
-    [ constantLiftingTests devLfVersion ]
+main = defaultMain $ testGroup "DA.Daml.LF"
+    [ constantLiftingTests devLfVersion
+    , externalCallTypeCheckerTests devLfVersion
+    ]
 
 -- The Simplifier calls the typechecker whose behavior is affected by feature
 -- flags. The simplifier may thus behave differently based on the version of LF
@@ -117,3 +121,58 @@ constantLiftingTests version = testGroup ("Constant Lifting " <> renderVersion v
 
     exprVal :: T.Text -> Expr
     exprVal = EVal . qualify . ExprValName
+
+externalCallTypeCheckerTests :: Version -> TestTree
+externalCallTypeCheckerTests version = testGroup ("External call type checker " <> renderVersion version)
+    [ testCase "local aliases retain external-call type requirements" $ do
+        let diags = TypeChecker.checkPackage (initWorldSelf [] externalCallAliasPackage) version
+        assertBool
+            ("expected local EXTERNAL_CALL alias to reject ContractId input, got: " <> show (map D._message diags))
+            (any (T.isInfixOf "expected serializable type:" . D._message) diags)
+    ]
+  where
+    externalCallAliasPackage = Package
+        { packageLfVersion = version
+        , packageModules = NM.fromList [externalCallAliasModule]
+        , packageMetadata = PackageMetadata (PackageName "external-call-typechecker-test") (PackageVersion "0.0.0") Nothing
+        , importedPackages = Left $ noPkgImportsReasonTesting "DA.Daml.LF.Simplifier.Tests"
+        }
+
+    externalCallAliasModule = Module
+        { moduleName = ModuleName ["M"]
+        , moduleSource = Nothing
+        , moduleFeatureFlags = daml12FeatureFlags
+        , moduleSynonyms = NM.empty
+        , moduleDataTypes = NM.empty
+        , moduleTemplates = NM.empty
+        , moduleValues = NM.fromList [externalCallAliasValue]
+        , moduleExceptions = NM.empty
+        , moduleInterfaces = NM.empty
+        }
+
+    externalCallAliasValue = DefValue
+        { dvalLocation = Nothing
+        , dvalBinder = (ExprValName "callThroughAlias", externalCallAliasType)
+        , dvalBody =
+            ETmLam (cidVar, contractIdUnitTy) $
+            ELet
+                (Binding (aliasVar, externalCallType) (EBuiltinFun BEExternalCall))
+                (EVar aliasVar
+                    `ETyApp` contractIdUnitTy
+                    `ETyApp` TText
+                    `ETmApp` EBuiltinFun (BEText "ext")
+                    `ETmApp` EBuiltinFun (BEText "fun")
+                    `ETmApp` EBuiltinFun (BEText "00")
+                    `ETmApp` EVar cidVar)
+        }
+
+    externalCallAliasType = contractIdUnitTy :-> TUpdate TText
+    contractIdUnitTy = TContractId TUnit
+    cidVar = ExprVarName "cid"
+    aliasVar = ExprVarName "f"
+    inputVar = TypeVarName "input"
+    outputVar = TypeVarName "output"
+    externalCallType =
+        TForall (inputVar, KStar) $
+        TForall (outputVar, KStar) $
+            TText :-> TText :-> TText :-> TVar inputVar :-> TUpdate (TVar outputVar)

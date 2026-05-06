@@ -47,7 +47,7 @@ import           Data.List.Extended
 import Data.Generics.Uniplate.Data (para)
 import qualified Data.Set as S
 import qualified Data.HashSet as HS
-import           Data.Maybe (listToMaybe)
+import           Data.Maybe (fromMaybe, listToMaybe)
 import qualified Data.Map.Strict as Map
 import qualified Data.NameMap as NM
 import qualified Data.IntSet as IntSet
@@ -415,52 +415,39 @@ checkExternalCallType req typ = do
     throwWithContext (EExpectedSerializableType req typX URContractId)
 
 externalCallTypeRequirement :: MonadGamma m => Expr -> m (Maybe SerializabilityRequirement)
-externalCallTypeRequirement expr =
-  case stripLocations expr of
-    e | isDirectExternalCallHead e -> pure (Just SRExternalCallInput)
-    ETyApp headExpr _
-      | isDirectExternalCallHead headExpr -> pure (Just SRExternalCallOutput)
-    EVal val -> do
-      externalCallAlias <- resolvesToExternalCallHead S.empty val
-      pure (if externalCallAlias then Just SRExternalCallInput else Nothing)
-    ETyApp (stripLocations -> EVal val) _ -> do
-      externalCallAlias <- resolvesToExternalCallHead S.empty val
-      pure (if externalCallAlias then Just SRExternalCallOutput else Nothing)
-    _ -> pure Nothing
+externalCallTypeRequirement expr = do
+  reqs <- externalCallTypeRequirements S.empty expr
+  pure $ case reqs of
+    req : _ -> Just req
+    [] -> Nothing
 
 stripLocations :: Expr -> Expr
 stripLocations = \case
   ELocation _ expr -> stripLocations expr
   expr -> expr
 
-isDirectExternalCallHead :: Expr -> Bool
-isDirectExternalCallHead = \case
-  EBuiltinFun BEExternalCall -> True
-  EVal val -> isExternalCallWrapperValue val
-  ELocation _ expr -> isDirectExternalCallHead expr
-  _ -> False
+externalCallTypeRequirements :: MonadGamma m => S.Set (Qualified ExprValName) -> Expr -> m [SerializabilityRequirement]
+externalCallTypeRequirements seen expr =
+  case stripLocations expr of
+    EBuiltinFun BEExternalCall -> pure [SRExternalCallInput, SRExternalCallOutput]
+    EVar var -> fromMaybe [] <$> lookupExternalCallExprVar var
+    EVal val -> resolvesToExternalCallHead seen val
+    ETyLam _ body -> externalCallTypeRequirements seen body
+    ETyApp body _ -> drop 1 <$> externalCallTypeRequirements seen body
+    _ -> pure []
 
-resolvesToExternalCallHead :: MonadGamma m => S.Set (Qualified ExprValName) -> Qualified ExprValName -> m Bool
+resolvesToExternalCallHead :: MonadGamma m => S.Set (Qualified ExprValName) -> Qualified ExprValName -> m [SerializabilityRequirement]
 resolvesToExternalCallHead seen val
-  | isExternalCallWrapperValue val = pure True
-  | S.member val seen = pure False
+  | isExternalCallWrapperValue val = pure [SRExternalCallInput, SRExternalCallOutput]
+  | S.member val seen = pure []
   | otherwise = do
       DefValue _ _ body <- inWorld (lookupValue val)
       case stripLocations body of
-        EBuiltinFun BEExternalCall -> pure True
+        EBuiltinFun BEExternalCall -> pure [SRExternalCallInput, SRExternalCallOutput]
         EVal nextVal -> resolvesToExternalCallHead (S.insert val seen) nextVal
-        ETyLam _ body' -> resolvesToExternalCallExpr (S.insert val seen) body'
-        ETyApp body' _ -> resolvesToExternalCallExpr (S.insert val seen) body'
-        _ -> pure False
-
-resolvesToExternalCallExpr :: MonadGamma m => S.Set (Qualified ExprValName) -> Expr -> m Bool
-resolvesToExternalCallExpr seen expr =
-  case stripLocations expr of
-    EBuiltinFun BEExternalCall -> pure True
-    EVal val -> resolvesToExternalCallHead seen val
-    ETyLam _ body -> resolvesToExternalCallExpr seen body
-    ETyApp body _ -> resolvesToExternalCallExpr seen body
-    _ -> pure False
+        ETyLam _ body' -> externalCallTypeRequirements (S.insert val seen) body'
+        ETyApp body' _ -> drop 1 <$> externalCallTypeRequirements (S.insert val seen) body'
+        _ -> pure []
 
 isExternalCallWrapperValue :: Qualified ExprValName -> Bool
 isExternalCallWrapperValue Qualified{qualModule, qualObject} =
@@ -667,7 +654,9 @@ typeOfLet :: MonadGamma m => Binding -> Expr -> m Type
 typeOfLet (Binding (var, typ0) expr) body = do
   checkType typ0 KStar
   typ1 <- checkExpr' expr typ0
-  introExprVar var typ1 (typeOf body)
+  externalCallReqs <- externalCallTypeRequirements S.empty expr
+  let introAlias = if null externalCallReqs then id else introExternalCallExprVar var externalCallReqs
+  introExprVar var typ1 (introAlias (typeOf body))
 
 checkCons :: MonadGamma m => Type -> Expr -> Expr -> m ()
 checkCons elemType headExpr tailExpr = do

@@ -48,6 +48,7 @@ da_haskell_test(
         "base",
         "containers",
         "filepath",
+        "ghcide",
         "tasty",
         "tasty-hunit",
         "text",

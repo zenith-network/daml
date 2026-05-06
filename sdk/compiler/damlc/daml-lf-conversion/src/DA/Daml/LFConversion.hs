@@ -1656,42 +1656,36 @@ convertExpr env0 e = do
             pure $ ETmLam (v, TStruct fields) $ ERecCon tupleType $ zipWithFrom mkFieldProj (1 :: Int) fields
     go env (VarIn GHC_Types "primitive") (LType (isStrLitTy -> Just y) : LType t : args)
         = fmap (, args) $ convertPrim (envLfVersion env) (unpackFS y) =<< convertType env t
-    go env (VarIn externalModule "externalCall") (LType input : LType output : LExpr _serializableInput : LExpr _serializableOutput : LExpr extensionId : LExpr functionId : LExpr configHex : LExpr inputExpr : args)
-        | DA_External <- externalModule
-        = fmap (, args) $ do
-            inputTy <- convertType env input
-            outputTy <- convertType env output
-            extensionIdExpr <- convertExpr env extensionId
-            functionIdExpr <- convertExpr env functionId
-            configHexExpr <- convertExpr env configHex
-            inputExpr' <- convertExpr env inputExpr
-            isBytesHex <- EVal <$> qualify env externalModule (mkVal "isBytesHex")
-            let externalCallExpr =
-                    EBuiltinFun BEExternalCall
-                        `ETyApp` inputTy
-                        `ETyApp` outputTy
-                        `ETmApp` extensionIdExpr
-                        `ETmApp` functionIdExpr
-                        `ETmApp` configHexExpr
-                        `ETmApp` inputExpr'
-                invalidConfigMessage =
-                    EBuiltinFun BEAppendText
-                        `ETmApp` EBuiltinFun (BEText "External call failed: Invalid hex encoding in config: ")
-                        `ETmApp` configHexExpr
-                invalidConfigError =
-                    ETyApp (EBuiltinFun BEError) (TUpdate outputTy) `ETmApp` invalidConfigMessage
-            pure $
-                ECase (isBytesHex `ETmApp` configHexExpr)
-                    [ CaseAlternative (CPBool True) (EUpdate $ UEmbedExpr outputTy externalCallExpr)
-                    , CaseAlternative (CPBool False) invalidConfigError
-                    ]
     go env (VarIn externalModule "externalCall") (LType input : LType output : LExpr _serializableInput : LExpr _serializableOutput : args)
         | DA_External <- externalModule
-        = fmap (, args) $ do
+        = do
             inputTy <- convertType env input
             outputTy <- convertType env output
-            convertPrim (envLfVersion env) "BEExternalCall" $
-                TText :-> TText :-> TText :-> inputTy :-> TUpdate outputTy
+            withTmArg env TText args $ \extensionIdExpr args ->
+                withTmArg env TText args $ \functionIdExpr args ->
+                withTmArg env TText args $ \configHexExpr args ->
+                withTmArg env inputTy args $ \inputExpr' args ->
+                    fmap (, args) $ do
+                        isBytesHex <- EVal <$> qualify env externalModule (mkVal "isBytesHex")
+                        let externalCallExpr =
+                                EBuiltinFun BEExternalCall
+                                    `ETyApp` inputTy
+                                    `ETyApp` outputTy
+                                    `ETmApp` extensionIdExpr
+                                    `ETmApp` functionIdExpr
+                                    `ETmApp` configHexExpr
+                                    `ETmApp` inputExpr'
+                            invalidConfigMessage =
+                                EBuiltinFun BEAppendText
+                                    `ETmApp` EBuiltinFun (BEText "External call failed: Invalid hex encoding in config: ")
+                                    `ETmApp` configHexExpr
+                            invalidConfigError =
+                                ETyApp (EBuiltinFun BEError) (TUpdate outputTy) `ETmApp` invalidConfigMessage
+                        pure $
+                            ECase (isBytesHex `ETmApp` configHexExpr)
+                                [ CaseAlternative (CPBool True) (EUpdate $ UEmbedExpr outputTy externalCallExpr)
+                                , CaseAlternative (CPBool False) invalidConfigError
+                                ]
     -- erase bypassReduceLambda calls and leave only the body.
     go env (VarIn DA_Internal_Desugar "bypassReduceLambda") (LType _t : LExpr body : args)
         = go env body args

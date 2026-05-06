@@ -1,0 +1,11 @@
+-- Copyright (c) 2026 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+-- SPDX-License-Identifier: Apache-2.0
+
+-- @QUERY-LF [ $pkg | .modules[] | .values[] | select(.name_with_type | lf::get_value_name($pkg) == ["partialCall"]) | .expr | lf::norm_interned($pkg) | .. | objects | select(has("case")) ] | length >= 1
+
+module ExternalCallPartialConfigGuard where
+
+import DA.External
+
+partialCall : Text -> Update Text
+partialCall = externalCall "echo" "partial" "00"
