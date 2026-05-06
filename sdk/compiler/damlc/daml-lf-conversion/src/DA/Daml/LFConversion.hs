@@ -1656,7 +1656,37 @@ convertExpr env0 e = do
             pure $ ETmLam (v, TStruct fields) $ ERecCon tupleType $ zipWithFrom mkFieldProj (1 :: Int) fields
     go env (VarIn GHC_Types "primitive") (LType (isStrLitTy -> Just y) : LType t : args)
         = fmap (, args) $ convertPrim (envLfVersion env) (unpackFS y) =<< convertType env t
-    go env (VarIn DA_External "externalCall") (LType input : LType output : LExpr _serializableInput : LExpr _serializableOutput : args)
+    go env (VarIn externalModule "externalCall") (LType input : LType output : LExpr _serializableInput : LExpr _serializableOutput : LExpr extensionId : LExpr functionId : LExpr configHex : LExpr inputExpr : args)
+        | DA_External <- externalModule
+        = fmap (, args) $ do
+            inputTy <- convertType env input
+            outputTy <- convertType env output
+            extensionIdExpr <- convertExpr env extensionId
+            functionIdExpr <- convertExpr env functionId
+            configHexExpr <- convertExpr env configHex
+            inputExpr' <- convertExpr env inputExpr
+            isBytesHex <- EVal <$> qualify env externalModule (mkVal "isBytesHex")
+            let externalCallExpr =
+                    EBuiltinFun BEExternalCall
+                        `ETyApp` inputTy
+                        `ETyApp` outputTy
+                        `ETmApp` extensionIdExpr
+                        `ETmApp` functionIdExpr
+                        `ETmApp` configHexExpr
+                        `ETmApp` inputExpr'
+                invalidConfigMessage =
+                    EBuiltinFun BEAppendText
+                        `ETmApp` EBuiltinFun (BEText "External call failed: Invalid hex encoding in config: ")
+                        `ETmApp` configHexExpr
+                invalidConfigError =
+                    ETyApp (EBuiltinFun BEError) (TUpdate outputTy) `ETmApp` invalidConfigMessage
+            pure $
+                ECase (isBytesHex `ETmApp` configHexExpr)
+                    [ CaseAlternative (CPBool True) (EUpdate $ UEmbedExpr outputTy externalCallExpr)
+                    , CaseAlternative (CPBool False) invalidConfigError
+                    ]
+    go env (VarIn externalModule "externalCall") (LType input : LType output : LExpr _serializableInput : LExpr _serializableOutput : args)
+        | DA_External <- externalModule
         = fmap (, args) $ do
             inputTy <- convertType env input
             outputTy <- convertType env output

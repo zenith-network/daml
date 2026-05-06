@@ -1,0 +1,21 @@
+-- Copyright (c) 2026 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+-- SPDX-License-Identifier: Apache-2.0
+
+-- @ERROR external call input
+
+module ExternalCallRejectNestedContractId where
+
+import DA.External
+
+data Box = Box with
+    cid : ContractId Asset
+  deriving (Eq, Show, Serializable)
+
+template Asset
+  with
+    owner : Party
+  where
+    signatory owner
+
+call : Box -> Update Text
+call box = externalCall "echo" "nestedContractId" "00" box

@@ -39,6 +39,7 @@ module DA.Daml.LF.TypeChecker.Check
 import Data.Hashable
 import           Control.Lens hiding (Context, MethodName, para)
 import           Control.Monad.Extra
+import           Control.Monad.Reader (asks)
 import           Data.Either.Combinators (whenLeft)
 import           Data.Foldable
 import           Data.Functor
@@ -392,29 +393,128 @@ typeOfTmApp fun arg = do
 
 typeOfTyApp :: MonadGamma m => Expr -> Type -> m Type
 typeOfTyApp expr typ = do
-  case expr of
-    EBuiltinFun BEExternalCall ->
-      checkExternalCallType SRExternalCallInput typ
-    ETyApp (EBuiltinFun BEExternalCall) _inputTyp ->
-      checkExternalCallType SRExternalCallOutput typ
-    _ -> pure ()
   exprType <- typeOf expr
   ((tvar, kind), typeBody) <- match _TForall (EExpectedUniversalType exprType) exprType
   checkType typ kind
+  externalCallTypeRequirement expr >>= \case
+    Nothing -> pure ()
+    Just req -> checkExternalCallType req typ
   -- NOTE(MH): Calling 'substitute' is safe since @typ@ and @typeBody@ live in
   -- the same context.
   pure (substitute (Map.singleton tvar typ) typeBody)
 
 checkExternalCallType :: MonadGamma m => SerializabilityRequirement -> Type -> m ()
 checkExternalCallType req typ = do
-  Serializability.checkTypeWithTypeVariablesInScope req typ
-  when (containsContractId typ) $
-    throwWithContext (EExpectedSerializableType req typ URContractId)
+  typX <- expandTypeSynonyms typ
+  trustedWrapper <- isTrustedExternalCallWrapperContext
+  (if trustedWrapper
+     then Serializability.checkTypeWithTypeVariablesInScope
+     else Serializability.checkType) req typX
+  containsCid <- containsContractIdDeep typX
+  when containsCid $
+    throwWithContext (EExpectedSerializableType req typX URContractId)
+
+externalCallTypeRequirement :: MonadGamma m => Expr -> m (Maybe SerializabilityRequirement)
+externalCallTypeRequirement expr =
+  case stripLocations expr of
+    e | isDirectExternalCallHead e -> pure (Just SRExternalCallInput)
+    ETyApp headExpr _
+      | isDirectExternalCallHead headExpr -> pure (Just SRExternalCallOutput)
+    EVal val -> do
+      externalCallAlias <- resolvesToExternalCallHead S.empty val
+      pure (if externalCallAlias then Just SRExternalCallInput else Nothing)
+    ETyApp (stripLocations -> EVal val) _ -> do
+      externalCallAlias <- resolvesToExternalCallHead S.empty val
+      pure (if externalCallAlias then Just SRExternalCallOutput else Nothing)
+    _ -> pure Nothing
+
+stripLocations :: Expr -> Expr
+stripLocations = \case
+  ELocation _ expr -> stripLocations expr
+  expr -> expr
+
+isDirectExternalCallHead :: Expr -> Bool
+isDirectExternalCallHead = \case
+  EBuiltinFun BEExternalCall -> True
+  EVal val -> isExternalCallWrapperValue val
+  ELocation _ expr -> isDirectExternalCallHead expr
+  _ -> False
+
+resolvesToExternalCallHead :: MonadGamma m => S.Set (Qualified ExprValName) -> Qualified ExprValName -> m Bool
+resolvesToExternalCallHead seen val
+  | isExternalCallWrapperValue val = pure True
+  | S.member val seen = pure False
+  | otherwise = do
+      DefValue _ _ body <- inWorld (lookupValue val)
+      case stripLocations body of
+        EBuiltinFun BEExternalCall -> pure True
+        EVal nextVal -> resolvesToExternalCallHead (S.insert val seen) nextVal
+        ETyLam _ body' -> resolvesToExternalCallExpr (S.insert val seen) body'
+        ETyApp body' _ -> resolvesToExternalCallExpr (S.insert val seen) body'
+        _ -> pure False
+
+resolvesToExternalCallExpr :: MonadGamma m => S.Set (Qualified ExprValName) -> Expr -> m Bool
+resolvesToExternalCallExpr seen expr =
+  case stripLocations expr of
+    EBuiltinFun BEExternalCall -> pure True
+    EVal val -> resolvesToExternalCallHead seen val
+    ETyLam _ body -> resolvesToExternalCallExpr seen body
+    ETyApp body _ -> resolvesToExternalCallExpr seen body
+    _ -> pure False
+
+isExternalCallWrapperValue :: Qualified ExprValName -> Bool
+isExternalCallWrapperValue Qualified{qualModule, qualObject} =
+  qualModule == ModuleName ["DA", "External"] &&
+  unExprValName qualObject == "externalCall"
+
+isTrustedExternalCallWrapperContext :: MonadGamma m => m Bool
+isTrustedExternalCallWrapperContext = do
+  ctx <- asks _locCtx
+  case ctx of
+    ContextDefValue m dval ->
+      if moduleName m == ModuleName ["DA", "External"] &&
+         unExprValName (fst (dvalBinder dval)) == "externalCall"
+      then isCanonicalExternalCallWrapperType <$> expandTypeSynonyms (dvalType dval)
+      else pure False
+    _ -> pure False
+
+isCanonicalExternalCallWrapperType :: Type -> Bool
+isCanonicalExternalCallWrapperType = \case
+  TForall (inputVar, KStar) (TForall (outputVar, KStar) body) ->
+    dropExternalCallContextArgs body ==
+      (TText :-> TText :-> TText :-> TVar inputVar :-> TUpdate (TVar outputVar))
+  _ -> False
+
+dropExternalCallContextArgs :: Type -> Type
+dropExternalCallContextArgs = \case
+  TApp (TApp (TBuiltin BTArrow) arg) body
+    | arg /= TText -> dropExternalCallContextArgs body
+  body -> body
+
+containsContractIdDeep :: MonadGamma m => Type -> m Bool
+containsContractIdDeep = go S.empty
   where
-    containsContractId =
-      para \t children -> case t of
-        TContractId{} -> True
-        _ -> or children
+    go seen typ0 = do
+      typ <- expandTypeSynonyms typ0
+      case typ of
+        TContractId{} -> pure True
+        TConApp tcon targs -> do
+          hasContractIdArg <- anyM (go seen) targs
+          if hasContractIdArg || S.member tcon seen
+            then pure hasContractIdArg
+            else do
+              DefDataType _ _ _ tparams dataCons <- inWorld (lookupDataType tcon)
+              subst0 <- match _Just (ETypeConAppWrongArity (TypeConApp tcon targs)) (zipExactMay tparams targs)
+              let subst = Map.fromList [(tvar, targ) | ((tvar, _), targ) <- subst0]
+              anyM (go (S.insert tcon seen) . substitute subst) (toListOf dataConsType dataCons)
+        TList typ' -> go seen typ'
+        TOptional typ' -> go seen typ'
+        TTextMap typ' -> go seen typ'
+        TGenMap key value -> (||) <$> go seen key <*> go seen value
+        TApp fun arg -> (||) <$> go seen fun <*> go seen arg
+        TForall _ body -> go seen body
+        TStruct fields -> anyM (go seen . snd) fields
+        _ -> pure False
 
 typeOfTmLam :: MonadGamma m => (ExprVarName, Type) -> Expr -> m Type
 typeOfTmLam (var, typ) body = do
