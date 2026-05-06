@@ -1,3 +1,5 @@
+.codex
+/.direnv
 # private configuration
 .envrc.private
 
