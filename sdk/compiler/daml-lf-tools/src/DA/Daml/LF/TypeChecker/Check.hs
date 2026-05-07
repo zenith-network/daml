@@ -39,7 +39,6 @@ module DA.Daml.LF.TypeChecker.Check
 import Data.Hashable
 import           Control.Lens hiding (Context, MethodName, para)
 import           Control.Monad.Extra
-import           Control.Monad.Reader (asks)
 import           Data.Either.Combinators (whenLeft)
 import           Data.Foldable
 import           Data.Functor
@@ -47,7 +46,7 @@ import           Data.List.Extended
 import Data.Generics.Uniplate.Data (para)
 import qualified Data.Set as S
 import qualified Data.HashSet as HS
-import           Data.Maybe (fromMaybe, listToMaybe)
+import           Data.Maybe (listToMaybe)
 import qualified Data.Map.Strict as Map
 import qualified Data.NameMap as NM
 import qualified Data.IntSet as IntSet
@@ -406,13 +405,103 @@ typeOfTyApp expr typ = do
 checkExternalCallType :: MonadGamma m => SerializabilityRequirement -> Type -> m ()
 checkExternalCallType req typ = do
   typX <- expandTypeSynonyms typ
-  trustedWrapper <- isTrustedExternalCallWrapperContext
-  (if trustedWrapper
-     then Serializability.checkTypeWithTypeVariablesInScope
-     else Serializability.checkType) req typX
+  Serializability.checkType req typX
   containsCid <- containsContractIdDeep typX
   when containsCid $
     throwWithContext (EExpectedSerializableType req typX URContractId)
+
+checkExternalCallUsages :: MonadGamma m => Expr -> m ()
+checkExternalCallUsages = goExpr
+  where
+    goExpr expr0 =
+      case stripLocations expr0 of
+        expr
+          | Just (inputTy, outputTy, args) <- matchExternalCall expr -> do
+              checkExternalCallType SRExternalCallInput inputTy
+              checkExternalCallType SRExternalCallOutput outputTy
+              traverse_ goExpr args
+        EBuiltinFun BEExternalCall -> throwWithContext EUnsupportedExternalCallUsage
+        EVar{} -> pure ()
+        EVal{} -> pure ()
+        EBuiltinFun{} -> pure ()
+        ERecCon _ fields -> traverse_ (goExpr . snd) fields
+        ERecProj _ _ record -> goExpr record
+        ERecUpd _ _ record update -> goExpr record >> goExpr update
+        EVariantCon _ _ arg -> goExpr arg
+        EEnumCon{} -> pure ()
+        EStructCon fields -> traverse_ (goExpr . snd) fields
+        EStructProj _ struct -> goExpr struct
+        EStructUpd _ struct update -> goExpr struct >> goExpr update
+        ETmApp fun arg -> goExpr fun >> goExpr arg
+        ETyApp body _ -> goExpr body
+        ETmLam _ body -> goExpr body
+        ETyLam _ body -> goExpr body
+        ECase scrut alts -> goExpr scrut >> traverse_ (goExpr . altExpr) alts
+        ELet (Binding _ bound) body -> goExpr bound >> goExpr body
+        ENil{} -> pure ()
+        ECons _ headExpr tailExpr -> goExpr headExpr >> goExpr tailExpr
+        ESome _ body -> goExpr body
+        ENone{} -> pure ()
+        EToAny _ body -> goExpr body
+        EFromAny _ body -> goExpr body
+        ETypeRep{} -> pure ()
+        EToAnyException _ body -> goExpr body
+        EFromAnyException _ body -> goExpr body
+        EThrow _ _ body -> goExpr body
+        EToInterface _ _ body -> goExpr body
+        EFromInterface _ _ body -> goExpr body
+        EUnsafeFromInterface _ _ cid body -> goExpr cid >> goExpr body
+        ECallInterface _ _ body -> goExpr body
+        EToRequiredInterface _ _ body -> goExpr body
+        EFromRequiredInterface _ _ body -> goExpr body
+        EUnsafeFromRequiredInterface _ _ cid body -> goExpr cid >> goExpr body
+        EInterfaceTemplateTypeRep _ body -> goExpr body
+        ESignatoryInterface _ body -> goExpr body
+        EObserverInterface _ body -> goExpr body
+        EUpdate update -> goUpdate update
+        ELocation _ body -> goExpr body
+        EViewInterface _ body -> goExpr body
+        EChoiceController _ _ contract choiceArg -> goExpr contract >> goExpr choiceArg
+        EChoiceObserver _ _ contract choiceArg -> goExpr contract >> goExpr choiceArg
+        EExperimental{} -> pure ()
+
+    goUpdate = \case
+      UPure _ expr -> goExpr expr
+      UBind (Binding _ bound) body -> goExpr bound >> goExpr body
+      UCreate _ arg -> goExpr arg
+      UCreateInterface _ arg -> goExpr arg
+      UExercise _ _ contractId arg -> goExpr contractId >> goExpr arg
+      UExerciseInterface _ _ contractId arg guard ->
+        goExpr contractId >> goExpr arg >> traverse_ goExpr guard
+      UExerciseByKey _ _ key arg -> goExpr key >> goExpr arg
+      UFetch _ contractId -> goExpr contractId
+      UFetchInterface _ contractId -> goExpr contractId
+      UGetTime -> pure ()
+      ULedgerTimeLT expr -> goExpr expr
+      UEmbedExpr _ body -> goExpr body
+      ULookupByKey{} -> pure ()
+      ULookupNByKey{} -> pure ()
+      UFetchByKey{} -> pure ()
+      UTryCatch _ body _ handler -> goExpr body >> goExpr handler
+
+    matchExternalCall expr =
+      case (stripLocations headExpr, typeArgs, termArgs) of
+        (EBuiltinFun BEExternalCall, [inputTy, outputTy], [extensionId, functionId, config, input]) ->
+          Just (inputTy, outputTy, [extensionId, functionId, config, input])
+        _ -> Nothing
+      where
+        (headWithTypes, termArgs) = collectTmApps expr []
+        (headExpr, typeArgs) = collectTyApps headWithTypes []
+
+    collectTmApps expr args =
+      case stripLocations expr of
+        ETmApp fun arg -> collectTmApps fun (arg : args)
+        other -> (other, args)
+
+    collectTyApps expr args =
+      case stripLocations expr of
+        ETyApp body typ -> collectTyApps body (typ : args)
+        other -> (other, args)
 
 externalCallTypeRequirement :: MonadGamma m => Expr -> m (Maybe SerializabilityRequirement)
 externalCallTypeRequirement expr = do
@@ -430,53 +519,9 @@ externalCallTypeRequirements :: MonadGamma m => S.Set (Qualified ExprValName) ->
 externalCallTypeRequirements seen expr =
   case stripLocations expr of
     EBuiltinFun BEExternalCall -> pure [SRExternalCallInput, SRExternalCallOutput]
-    EVar var -> fromMaybe [] <$> lookupExternalCallExprVar var
-    EVal val -> resolvesToExternalCallHead seen val
     ETyLam _ body -> externalCallTypeRequirements seen body
     ETyApp body _ -> drop 1 <$> externalCallTypeRequirements seen body
     _ -> pure []
-
-resolvesToExternalCallHead :: MonadGamma m => S.Set (Qualified ExprValName) -> Qualified ExprValName -> m [SerializabilityRequirement]
-resolvesToExternalCallHead seen val
-  | isExternalCallWrapperValue val = pure [SRExternalCallInput, SRExternalCallOutput]
-  | S.member val seen = pure []
-  | otherwise = do
-      DefValue _ _ body <- inWorld (lookupValue val)
-      case stripLocations body of
-        EBuiltinFun BEExternalCall -> pure [SRExternalCallInput, SRExternalCallOutput]
-        EVal nextVal -> resolvesToExternalCallHead (S.insert val seen) nextVal
-        ETyLam _ body' -> externalCallTypeRequirements (S.insert val seen) body'
-        ETyApp body' _ -> drop 1 <$> externalCallTypeRequirements (S.insert val seen) body'
-        _ -> pure []
-
-isExternalCallWrapperValue :: Qualified ExprValName -> Bool
-isExternalCallWrapperValue Qualified{qualModule, qualObject} =
-  qualModule == ModuleName ["DA", "External"] &&
-  unExprValName qualObject == "externalCall"
-
-isTrustedExternalCallWrapperContext :: MonadGamma m => m Bool
-isTrustedExternalCallWrapperContext = do
-  ctx <- asks _locCtx
-  case ctx of
-    ContextDefValue m dval ->
-      if moduleName m == ModuleName ["DA", "External"] &&
-         unExprValName (fst (dvalBinder dval)) == "externalCall"
-      then isCanonicalExternalCallWrapperType <$> expandTypeSynonyms (dvalType dval)
-      else pure False
-    _ -> pure False
-
-isCanonicalExternalCallWrapperType :: Type -> Bool
-isCanonicalExternalCallWrapperType = \case
-  TForall (inputVar, KStar) (TForall (outputVar, KStar) body) ->
-    dropExternalCallContextArgs body ==
-      (TText :-> TText :-> TText :-> TVar inputVar :-> TUpdate (TVar outputVar))
-  _ -> False
-
-dropExternalCallContextArgs :: Type -> Type
-dropExternalCallContextArgs = \case
-  TApp (TApp (TBuiltin BTArrow) arg) body
-    | arg /= TText -> dropExternalCallContextArgs body
-  body -> body
 
 containsContractIdDeep :: MonadGamma m => Type -> m Bool
 containsContractIdDeep = go S.empty
@@ -654,9 +699,7 @@ typeOfLet :: MonadGamma m => Binding -> Expr -> m Type
 typeOfLet (Binding (var, typ0) expr) body = do
   checkType typ0 KStar
   typ1 <- checkExpr' expr typ0
-  externalCallReqs <- externalCallTypeRequirements S.empty expr
-  let introAlias = if null externalCallReqs then id else introExternalCallExprVar var externalCallReqs
-  introExprVar var typ1 (introAlias (typeOf body))
+  introExprVar var typ1 (typeOf body)
 
 checkCons :: MonadGamma m => Type -> Expr -> Expr -> m ()
 checkCons elemType headExpr tailExpr = do
@@ -946,6 +989,7 @@ checkExceptionType ty = do
 
 checkExpr' :: MonadGamma m => Expr -> Type -> m Type
 checkExpr' expr typ = do
+  checkExternalCallUsages expr
   exprType <- typeOf expr
   typX <- expandTypeSynonyms typ
   unless (alphaType exprType typX) $

@@ -161,6 +161,7 @@ data UnwarnableError
   | EExpectedUniversalType !Type
   | EExpectedUpdateType    !Type
   | EExpectedSerializableType !SerializabilityRequirement !Type !UnserializabilityReason
+  | EUnsupportedExternalCallUsage
   | EExpectedKeyTypeWithoutContractId !Type
   | EExpectedAnyType !Type
   | EExpectedExceptionType !Type
@@ -717,6 +718,8 @@ instance Pretty UnwarnableError where
       , "* problem:"
       , nest 4 (pretty info)
       ]
+    EUnsupportedExternalCallUsage ->
+      "EXTERNAL_CALL must be used directly with two type arguments and four value arguments"
     EExpectedKeyTypeWithoutContractId foundType ->
       vcat
       [ "contract key type should not contain ContractId:"

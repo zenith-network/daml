@@ -17,7 +17,6 @@ module DA.External
   , isBytesHex
   ) where
 
-import GHC.Types (primitive)
 import DA.Text qualified as Text
 
 type BytesHex = Text
@@ -58,6 +57,6 @@ externalCall
     Text -> Text -> BytesHex -> input -> Update output
 externalCall extensionId functionId configHex input
   | not (isBytesHex configHex) = error ("External call failed: Invalid hex encoding in config: " <> configHex)
-  | otherwise = primitive @"BEExternalCall" extensionId functionId configHex input
+  | otherwise = error "DA.External.externalCall must be lowered by the compiler"
 
 #endif

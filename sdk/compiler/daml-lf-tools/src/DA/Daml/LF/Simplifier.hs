@@ -492,6 +492,7 @@ alwaysLiftUnder = \case
 -- require any computation.
 isWorthLifting :: Expr -> Bool
 isWorthLifting = \case
+    e | isExternalCallApplication e -> False
     EVar _ -> False
     EVal _ -> False
     EBuiltinFun _ -> False
@@ -504,6 +505,18 @@ isWorthLifting = \case
     ETyLam _ e -> isWorthLifting e
     ELocation _ e -> isWorthLifting e
     _ -> True
+
+isExternalCallApplication :: Expr -> Bool
+isExternalCallApplication = goTmApp . stripLoc
+  where
+    goTmApp = \case
+      ETmApp fun _ -> goTmApp (stripLoc fun)
+      expr -> goTyApp expr
+
+    goTyApp = \case
+      ETyApp body _ -> goTyApp (stripLoc body)
+      EBuiltinFun BEExternalCall -> True
+      _ -> False
 
 data SimplifierState = SimplifierState
     { sWorld :: World

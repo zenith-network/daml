@@ -84,6 +84,29 @@ constantLiftingTests version = testGroup ("Constant Lifting " <> renderVersion v
                     (EVar (ExprVarName "z"))))
             -- NOTE: this is a candidate for eta reduction, may be optimized in the future
         ]
+    , mkTestCase "do not lift partial EXTERNAL_CALL heads"
+        [ dval "partialExternalCall" (TText :-> TText :-> TUpdate TText)
+            (ETmLam (ExprVarName "configHex", TText)
+                (ETmLam (ExprVarName "inputValue", TText)
+                    (EBuiltinFun BEExternalCall
+                        `ETyApp` TText
+                        `ETyApp` TText
+                        `ETmApp` EBuiltinFun (BEText "ext")
+                        `ETmApp` EBuiltinFun (BEText "fun")
+                        `ETmApp` EVar (ExprVarName "configHex")
+                        `ETmApp` EVar (ExprVarName "inputValue"))))
+        ]
+        [ dval "partialExternalCall" (TText :-> TText :-> TUpdate TText)
+            (ETmLam (ExprVarName "configHex", TText)
+                (ETmLam (ExprVarName "inputValue", TText)
+                    (EBuiltinFun BEExternalCall
+                        `ETyApp` TText
+                        `ETyApp` TText
+                        `ETmApp` EBuiltinFun (BEText "ext")
+                        `ETmApp` EBuiltinFun (BEText "fun")
+                        `ETmApp` EVar (ExprVarName "configHex")
+                        `ETmApp` EVar (ExprVarName "inputValue"))))
+        ]
     ]
   where
     mkTestCase :: String -> [DefValue] -> [DefValue] -> TestTree
@@ -124,10 +147,15 @@ constantLiftingTests version = testGroup ("Constant Lifting " <> renderVersion v
 
 externalCallTypeCheckerTests :: Version -> TestTree
 externalCallTypeCheckerTests version = testGroup ("External call type checker " <> renderVersion version)
-    [ testCase "local aliases retain external-call type requirements" $ do
+    [ testCase "local aliases to EXTERNAL_CALL are rejected" $ do
         let diags = TypeChecker.checkPackage (initWorldSelf [] externalCallAliasPackage) version
         assertBool
-            ("expected local EXTERNAL_CALL alias to reject ContractId input, got: " <> show (map D._message diags))
+            ("expected local EXTERNAL_CALL alias to be rejected, got: " <> show (map D._message diags))
+            (any (T.isInfixOf "EXTERNAL_CALL must be used directly" . D._message) diags)
+    , testCase "DA.External.externalCall names are not trusted by validation" $ do
+        let diags = TypeChecker.checkPackage (initWorldSelf [] externalCallWrapperPackage) version
+        assertBool
+            ("expected polymorphic DA.External.externalCall wrapper to be rejected, got: " <> show (map D._message diags))
             (any (T.isInfixOf "expected serializable type:" . D._message) diags)
     ]
   where
@@ -176,3 +204,48 @@ externalCallTypeCheckerTests version = testGroup ("External call type checker " 
         TForall (inputVar, KStar) $
         TForall (outputVar, KStar) $
             TText :-> TText :-> TText :-> TVar inputVar :-> TUpdate (TVar outputVar)
+
+    externalCallWrapperPackage = Package
+        { packageLfVersion = version
+        , packageModules = NM.fromList [externalCallWrapperModule]
+        , packageMetadata = PackageMetadata (PackageName "external-call-wrapper-test") (PackageVersion "0.0.0") Nothing
+        , importedPackages = Left $ noPkgImportsReasonTesting "DA.Daml.LF.Simplifier.Tests"
+        }
+
+    externalCallWrapperModule = Module
+        { moduleName = ModuleName ["DA", "External"]
+        , moduleSource = Nothing
+        , moduleFeatureFlags = daml12FeatureFlags
+        , moduleSynonyms = NM.empty
+        , moduleDataTypes = NM.empty
+        , moduleTemplates = NM.empty
+        , moduleValues = NM.fromList [externalCallWrapperValue]
+        , moduleExceptions = NM.empty
+        , moduleInterfaces = NM.empty
+        }
+
+    externalCallWrapperValue = DefValue
+        { dvalLocation = Nothing
+        , dvalBinder = (ExprValName "externalCall", externalCallWrapperType)
+        , dvalBody =
+            ETyLam (inputVar, KStar) $
+            ETyLam (outputVar, KStar) $
+            ETmLam (ExprVarName "_serializableInput", TBool) $
+            ETmLam (ExprVarName "_serializableOutput", TBool) $
+            ETmLam (ExprVarName "extensionId", TText) $
+            ETmLam (ExprVarName "functionId", TText) $
+            ETmLam (ExprVarName "configHex", TText) $
+            ETmLam (ExprVarName "inputValue", TVar inputVar) $
+                EBuiltinFun BEExternalCall
+                    `ETyApp` TVar inputVar
+                    `ETyApp` TVar outputVar
+                    `ETmApp` EVar (ExprVarName "extensionId")
+                    `ETmApp` EVar (ExprVarName "functionId")
+                    `ETmApp` EVar (ExprVarName "configHex")
+                    `ETmApp` EVar (ExprVarName "inputValue")
+        }
+
+    externalCallWrapperType =
+        TForall (inputVar, KStar) $
+        TForall (outputVar, KStar) $
+            TBool :-> TBool :-> TText :-> TText :-> TText :-> TVar inputVar :-> TUpdate (TVar outputVar)

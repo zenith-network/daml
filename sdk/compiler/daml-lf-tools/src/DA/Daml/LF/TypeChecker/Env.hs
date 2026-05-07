@@ -23,9 +23,7 @@ module DA.Daml.LF.TypeChecker.Env(
     introTypeVar,
     introTypeVars,
     introExprVar,
-    introExternalCallExprVar,
     lookupExprVar,
-    lookupExternalCallExprVar,
     withContext, withContextF,
     getLfVersion,
     getWorld,
@@ -54,9 +52,6 @@ data Gamma = Gamma
     -- ^ The type variables in scope.
   , _evars :: !(HashMap ExprVarName Type)
     -- ^ The term variables in scope and their types.
-  , _externalCallVars :: !(HashMap ExprVarName [SerializabilityRequirement])
-    -- ^ Term variables that are known local aliases for EXTERNAL_CALL and
-    -- the remaining type-argument requirements they need to enforce.
   , _world :: !World
     -- ^ The packages in scope.
   , _lfVersion :: Version
@@ -109,7 +104,7 @@ match p e x = either (const (throwWithContext e)) pure (matching p x)
 -- | Environment containing only the packages in scope but no type or term
 -- variables.
 emptyGamma :: World -> Version -> Gamma
-emptyGamma world version = Gamma ContextNone mempty mempty mempty world version (mkWarningFlags warningFlagParser [])
+emptyGamma world version = Gamma ContextNone mempty mempty world version (mkWarningFlags warningFlagParser [])
 
 -- | Run a computation in the current environment extended by a new type
 -- variable/kind binding. Does not fail on shadowing.
@@ -123,13 +118,7 @@ introTypeVars binders m = foldr (uncurry introTypeVar) m binders
 -- | Run a computation in the current enviroment extended by a new term
 -- variable/type binding. Does not fail on shadowing.
 introExprVar :: MonadGamma m => ExprVarName -> Type -> m a -> m a
-introExprVar x t = local ((evars . at x ?~ t) . (externalCallVars . at x .~ Nothing))
-
--- | Mark a term variable as an alias for EXTERNAL_CALL. This is tracked
--- separately from the type environment so unrelated functions with the same
--- polymorphic type are not treated as external calls.
-introExternalCallExprVar :: MonadGamma m => ExprVarName -> [SerializabilityRequirement] -> m a -> m a
-introExternalCallExprVar x reqs = local (externalCallVars . at x ?~ reqs)
+introExprVar x t = local (evars . at x ?~ t)
 
 -- | Check whether a type variable exists in the current environment. Fails with
 -- 'EUnknownTypeVar' if it does not exist.
@@ -142,9 +131,6 @@ lookupTypeVar v =
 lookupExprVar :: MonadGamma m => ExprVarName -> m Type
 lookupExprVar x =
   view (evars . at x) >>= match _Just (EUnknownExprVar x)
-
-lookupExternalCallExprVar :: MonadGamma m => ExprVarName -> m (Maybe [SerializabilityRequirement])
-lookupExternalCallExprVar x = view (externalCallVars . at x)
 
 inWorld  :: MonadGamma m => (World -> Either LookupError a) -> m a
 inWorld look = do
