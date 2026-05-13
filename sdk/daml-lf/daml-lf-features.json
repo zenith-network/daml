@@ -340,5 +340,27 @@
         }
       }
     }
+  },
+  "featureExternalCall" : {
+    "name" : "External Call",
+    "cppFlag" : "DAML_ExternalCall",
+    "versionRange" : {
+      "lowerBound" : {
+        "major" : 2,
+        "minor" : {
+          "Dev" : {
+
+          }
+        }
+      },
+      "upperBound" : {
+        "major" : 2,
+        "minor" : {
+          "Dev" : {
+
+          }
+        }
+      }
+    }
   }
 }

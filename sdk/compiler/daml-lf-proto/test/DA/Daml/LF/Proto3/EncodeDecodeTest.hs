@@ -36,6 +36,7 @@ entry = defaultMain $ testGroup "Round-trip tests"
     , rttTyLam
     , rttTyLamAndLet
     , rttDeepLetWithLoc
+    , rttExternalCallBuiltin
     , darTests
     ]
 
@@ -89,6 +90,9 @@ rttTyLamAndLet = testCase "tylam and let package" $ roundTripAssert $ mkOneModul
 rttDeepLetWithLoc :: TestTree
 rttDeepLetWithLoc = testCase "deep let with location package" $ roundTripAssert $ mkOneModulePackageForTest mkDeepLetWithLocModule
 
+rttExternalCallBuiltin :: TestTree
+rttExternalCallBuiltin = testCase "external call builtin package" $ roundTripAssert $ mkOneModulePackageForTest externalCallModule
+
 ------------------------------------------------------------------------
 -- .dar tests
 ------------------------------------------------------------------------
@@ -139,9 +143,10 @@ a = TypeVarName "a"
 x :: ExprVarName
 x = ExprVarName "x"
 
-f, lt :: ExprValName
+f, lt, externalCall :: ExprValName
 f = ExprValName "f"
 lt = ExprValName "lt"
+externalCall = ExprValName "externalCall"
 
 elam :: Expr
 elam = ETmLam (x, TVar a) (EVar x)
@@ -168,6 +173,16 @@ mkLet = DefValue (Just testLoc) (lt, TUnit) (elet "id" tyLamTyp tyLam (EVal $ eQ
 
 mkDeepLetWithLoc :: DefValue
 mkDeepLetWithLoc = DefValue (Just testLoc) (lt, TUnit) (letOfDepthWithLoc 1)
+
+externalCallModule :: Module
+externalCallModule = mkEmptyModule{moduleValues = NM.singleton mkDefExternalCall}
+
+mkDefExternalCall :: DefValue
+mkDefExternalCall =
+  DefValue
+    (Just testLoc)
+    (externalCall, TText :-> TText :-> TText :-> TText :-> TUpdate TText)
+    (EBuiltinFun BEExternalCall)
 
 letOfDepthWithLoc :: Int -> Expr
 letOfDepthWithLoc 0 = EUnit
