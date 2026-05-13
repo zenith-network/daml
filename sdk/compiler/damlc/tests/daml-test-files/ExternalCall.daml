@@ -1,0 +1,11 @@
+-- Copyright (c) 2025 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+-- SPDX-License-Identifier: Apache-2.0
+
+-- @SUPPORTS-LF-FEATURE DAML_ExternalCall
+
+module ExternalCall where
+
+import DA.External
+
+test : Update BytesHex
+test = externalCall "test-extension" "test-function" "a0" "b1"

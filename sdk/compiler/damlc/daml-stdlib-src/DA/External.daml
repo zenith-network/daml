@@ -1,0 +1,55 @@
+-- Copyright (c) 2025 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+-- SPDX-License-Identifier: Apache-2.0
+
+{-# LANGUAGE CPP #-}
+
+#ifndef DAML_ExternalCall
+
+-- | HIDE
+module DA.External where
+
+#else
+
+module DA.External
+  ( externalCall
+  , BytesHex
+  , isHex
+  , isBytesHex
+  ) where
+
+import GHC.Types (primitive)
+import DA.Text qualified as Text
+
+type BytesHex = Text
+
+isHex : Text -> Bool
+isHex = Text.isPred (\t -> t >= "0" && t <= "9" || t >= "a" && t <= "f")
+
+isBytesHex : Text -> Bool
+isBytesHex hex = Text.length hex % 2 == 0 && isHex hex
+
+-- | Perform an external call through the Daml-LF EXTERNAL_CALL builtin.
+--
+-- The call identifies a runtime-provided extension and function, and passes
+-- opaque configuration and input bytes to that function. The runtime that
+-- supports this builtin is responsible for resolving the identifiers, executing
+-- the call, and providing the result.
+--
+-- The config and input arguments must be lowercase hex-encoded byte strings.
+-- The result is returned as a hex-encoded byte string.
+--
+-- This function is an Update action. If the runtime cannot perform the call,
+-- the transaction is aborted with runtime-defined diagnostics.
+--
+-- Parameters:
+--   - extensionId: Opaque identifier for the external extension
+--   - functionId: Opaque identifier for the function within the extension
+--   - configHex: Runtime-defined configuration bytes as lowercase hex
+--   - inputHex: Input bytes as lowercase hex
+externalCall : Text -> Text -> BytesHex -> BytesHex -> Update BytesHex
+externalCall extensionId functionId configHex inputHex
+  | not (isBytesHex configHex) = error ("External call failed: Invalid lowercase hex encoding in config: " <> configHex)
+  | not (isBytesHex inputHex) = error ("External call failed: Invalid lowercase hex encoding in input: " <> inputHex)
+  | otherwise = primitive @"BEExternalCall" extensionId functionId configHex inputHex
+
+#endif
